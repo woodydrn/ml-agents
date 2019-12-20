@@ -10,11 +10,10 @@ import os
 
 import numpy as np
 
-from mlagents.envs.brain import BrainInfo
-from mlagents.envs.action_info import ActionInfoOutputs
-from mlagents.envs.timers import timed
+from mlagents_envs.timers import timed
 from mlagents.trainers.sac.policy import SACPolicy
-from mlagents.trainers.rl_trainer import RLTrainer, AllRewardsOutput
+from mlagents.trainers.rl_trainer import RLTrainer
+from mlagents.trainers.trajectory import Trajectory, SplitObservations
 
 
 LOGGER = logging.getLogger("mlagents.trainers")
@@ -81,7 +80,10 @@ class SACTrainer(RLTrainer):
             if "save_replay_buffer" in trainer_parameters
             else False
         )
-        self.policy = SACPolicy(seed, brain, trainer_parameters, self.is_training, load)
+        self.sac_policy = SACPolicy(
+            seed, brain, trainer_parameters, self.is_training, load
+        )
+        self.policy = self.sac_policy
 
         # Load the replay buffer if load
         if load and self.checkpoint_replay_buffer:
@@ -93,14 +95,12 @@ class SACTrainer(RLTrainer):
                 )
             LOGGER.debug(
                 "Loaded update buffer with {} sequences".format(
-                    len(self.training_buffer.update_buffer["actions"])
+                    self.update_buffer.num_experiences
                 )
             )
 
         for _reward_signal in self.policy.reward_signals.keys():
-            self.collected_rewards[_reward_signal] = {}
-
-        self.episode_steps = {}
+            self.collected_rewards[_reward_signal] = defaultdict(lambda: 0)
 
     def save_model(self) -> None:
         """
@@ -118,7 +118,7 @@ class SACTrainer(RLTrainer):
         filename = os.path.join(self.policy.model_path, "last_replay_buffer.hdf5")
         LOGGER.info("Saving Experience Replay Buffer to {}".format(filename))
         with open(filename, "wb") as file_object:
-            self.training_buffer.update_buffer.save_to_file(file_object)
+            self.update_buffer.save_to_file(file_object)
 
     def load_replay_buffer(self) -> None:
         """
@@ -127,96 +127,68 @@ class SACTrainer(RLTrainer):
         filename = os.path.join(self.policy.model_path, "last_replay_buffer.hdf5")
         LOGGER.info("Loading Experience Replay Buffer from {}".format(filename))
         with open(filename, "rb+") as file_object:
-            self.training_buffer.update_buffer.load_from_file(file_object)
+            self.update_buffer.load_from_file(file_object)
         LOGGER.info(
             "Experience replay buffer has {} experiences.".format(
-                len(self.training_buffer.update_buffer["actions"])
+                self.update_buffer.num_experiences
             )
         )
 
-    def add_policy_outputs(
-        self, take_action_outputs: ActionInfoOutputs, agent_id: str, agent_idx: int
-    ) -> None:
+    def process_trajectory(self, trajectory: Trajectory) -> None:
         """
-        Takes the output of the last action and store it into the training buffer.
+        Takes a trajectory and processes it, putting it into the replay buffer.
         """
-        actions = take_action_outputs["action"]
-        self.training_buffer[agent_id]["actions"].append(actions[agent_idx])
+        last_step = trajectory.steps[-1]
+        agent_id = trajectory.agent_id  # All the agents should have the same ID
 
-    def add_rewards_outputs(
-        self,
-        rewards_out: AllRewardsOutput,
-        values: Dict[str, np.ndarray],
-        agent_id: str,
-        agent_idx: int,
-        agent_next_idx: int,
-    ) -> None:
-        """
-        Takes the value output of the last action and store it into the training buffer.
-        """
-        self.training_buffer[agent_id]["environment_rewards"].append(
-            rewards_out.environment[agent_next_idx]
+        # Add to episode_steps
+        self.episode_steps[agent_id] += len(trajectory.steps)
+
+        agent_buffer_trajectory = trajectory.to_agentbuffer()
+
+        # Update the normalization
+        if self.is_training:
+            self.policy.update_normalization(agent_buffer_trajectory["vector_obs"])
+
+        # Evaluate all reward functions for reporting purposes
+        self.collected_rewards["environment"][agent_id] += np.sum(
+            agent_buffer_trajectory["environment_rewards"]
+        )
+        for name, reward_signal in self.policy.reward_signals.items():
+            evaluate_result = reward_signal.evaluate_batch(
+                agent_buffer_trajectory
+            ).scaled_reward
+            # Report the reward signals
+            self.collected_rewards[name][agent_id] += np.sum(evaluate_result)
+
+        # Get all value estimates for reporting purposes
+        value_estimates = self.policy.get_batched_value_estimates(
+            agent_buffer_trajectory
+        )
+        for name, v in value_estimates.items():
+            self.stats_reporter.add_stat(
+                self.policy.reward_signals[name].value_name, np.mean(v)
+            )
+
+        # Bootstrap using the last step rather than the bootstrap step if max step is reached.
+        # Set last element to duplicate obs and remove dones.
+        if last_step.max_step:
+            vec_vis_obs = SplitObservations.from_observations(last_step.obs)
+            for i, obs in enumerate(vec_vis_obs.visual_observations):
+                agent_buffer_trajectory["next_visual_obs%d" % i][-1] = obs
+            if vec_vis_obs.vector_observations.size > 1:
+                agent_buffer_trajectory["next_vector_in"][
+                    -1
+                ] = vec_vis_obs.vector_observations
+            agent_buffer_trajectory["done"][-1] = False
+
+        # Append to update buffer
+        agent_buffer_trajectory.resequence_and_append(
+            self.update_buffer, training_length=self.policy.sequence_length
         )
 
-    def process_experiences(
-        self, current_info: BrainInfo, next_info: BrainInfo
-    ) -> None:
-        """
-        Checks agent histories for processing condition, and processes them as necessary.
-        :param current_info: current BrainInfo.
-        :param next_info: next BrainInfo.
-        """
-        if self.is_training:
-            self.policy.update_normalization(next_info.vector_observations)
-        for l in range(len(next_info.agents)):
-            agent_actions = self.training_buffer[next_info.agents[l]]["actions"]
-            if (
-                next_info.local_done[l]
-                or len(agent_actions) >= self.trainer_parameters["time_horizon"]
-            ) and len(agent_actions) > 0:
-                agent_id = next_info.agents[l]
-
-                # Bootstrap using last brain info. Set last element to duplicate obs and remove dones.
-                if next_info.max_reached[l]:
-                    bootstrapping_info = self.training_buffer[agent_id].last_brain_info
-                    idx = bootstrapping_info.agents.index(agent_id)
-                    for i, obs in enumerate(bootstrapping_info.visual_observations):
-                        self.training_buffer[agent_id]["next_visual_obs%d" % i][
-                            -1
-                        ] = obs[idx]
-                    if self.policy.use_vec_obs:
-                        self.training_buffer[agent_id]["next_vector_in"][
-                            -1
-                        ] = bootstrapping_info.vector_observations[idx]
-                    self.training_buffer[agent_id]["done"][-1] = False
-
-                self.training_buffer.append_update_buffer(
-                    agent_id,
-                    batch_size=None,
-                    training_length=self.policy.sequence_length,
-                )
-
-                self.training_buffer[agent_id].reset_agent()
-                if next_info.local_done[l]:
-                    self.stats["Environment/Episode Length"].append(
-                        self.episode_steps.get(agent_id, 0)
-                    )
-                    self.episode_steps[agent_id] = 0
-                    for name, rewards in self.collected_rewards.items():
-                        if name == "environment":
-                            self.cumulative_returns_since_policy_update.append(
-                                rewards.get(agent_id, 0)
-                            )
-                            self.stats["Environment/Cumulative Reward"].append(
-                                rewards.get(agent_id, 0)
-                            )
-                            self.reward_buffer.appendleft(rewards.get(agent_id, 0))
-                            rewards[agent_id] = 0
-                        else:
-                            self.stats[
-                                self.policy.reward_signals[name].stat_name
-                            ].append(rewards.get(agent_id, 0))
-                            rewards[agent_id] = 0
+        if trajectory.done_reached:
+            self._update_end_episode_stats(agent_id)
 
     def is_ready_update(self) -> bool:
         """
@@ -224,8 +196,7 @@ class SACTrainer(RLTrainer):
         :return: A boolean corresponding to whether or not update_model() can be run
         """
         return (
-            len(self.training_buffer.update_buffer["actions"])
-            >= self.trainer_parameters["batch_size"]
+            self.update_buffer.num_experiences >= self.trainer_parameters["batch_size"]
             and self.step >= self.trainer_parameters["buffer_init_steps"]
         )
 
@@ -237,7 +208,7 @@ class SACTrainer(RLTrainer):
         """
         if self.step % self.train_interval == 0:
             self.trainer_metrics.start_policy_update_timer(
-                number_experiences=len(self.training_buffer.update_buffer["actions"]),
+                number_experiences=self.update_buffer.num_experiences,
                 mean_return=float(np.mean(self.cumulative_returns_since_policy_update)),
             )
             self.update_sac_policy()
@@ -262,9 +233,9 @@ class SACTrainer(RLTrainer):
         batch_update_stats: Dict[str, list] = defaultdict(list)
         for _ in range(num_updates):
             LOGGER.debug("Updating SAC policy at step {}".format(self.step))
-            buffer = self.training_buffer.update_buffer
+            buffer = self.update_buffer
             if (
-                len(self.training_buffer.update_buffer["actions"])
+                self.update_buffer.num_experiences
                 >= self.trainer_parameters["batch_size"]
             ):
                 sampled_minibatch = buffer.sample_mini_batch(
@@ -283,21 +254,19 @@ class SACTrainer(RLTrainer):
 
         # Truncate update buffer if neccessary. Truncate more than we need to to avoid truncating
         # a large buffer at each update.
-        if (
-            len(self.training_buffer.update_buffer["actions"])
-            > self.trainer_parameters["buffer_size"]
-        ):
-            self.training_buffer.truncate_update_buffer(
+        if self.update_buffer.num_experiences > self.trainer_parameters["buffer_size"]:
+            self.update_buffer.truncate(
                 int(self.trainer_parameters["buffer_size"] * BUFFER_TRUNCATE_PERCENT)
             )
 
         for stat, stat_list in batch_update_stats.items():
-            self.stats[stat].append(np.mean(stat_list))
+            self.stats_reporter.add_stat(stat, np.mean(stat_list))
 
-        if self.policy.bc_module:
-            update_stats = self.policy.bc_module.update()
+        bc_module = self.sac_policy.bc_module
+        if bc_module:
+            update_stats = bc_module.update()
             for stat, val in update_stats.items():
-                self.stats[stat].append(val)
+                self.stats_reporter.add_stat(stat, val)
 
     def update_reward_signals(self) -> None:
         """
@@ -309,7 +278,7 @@ class SACTrainer(RLTrainer):
         N times, then the reward signals are updated N times. Normally, the reward signal
         and policy are updated in parallel.
         """
-        buffer = self.training_buffer.update_buffer
+        buffer = self.update_buffer
         num_updates = self.reward_signal_updates_per_train
         n_sequences = max(
             int(self.trainer_parameters["batch_size"] / self.policy.sequence_length), 1
@@ -326,10 +295,10 @@ class SACTrainer(RLTrainer):
                         self.trainer_parameters["batch_size"],
                         sequence_length=self.policy.sequence_length,
                     )
-            update_stats = self.policy.update_reward_signals(
+            update_stats = self.sac_policy.update_reward_signals(
                 reward_signal_minibatches, n_sequences
             )
             for stat_name, value in update_stats.items():
                 batch_update_stats[stat_name].append(value)
         for stat, stat_list in batch_update_stats.items():
-            self.stats[stat].append(np.mean(stat_list))
+            self.stats_reporter.add_stat(stat, np.mean(stat_list))
