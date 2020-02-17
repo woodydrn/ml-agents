@@ -131,19 +131,15 @@ components:
 
 _Simplified block diagram of ML-Agents._
 
-The Learning Environment contains two additional components that help
+The Learning Environment contains an additional component that help
 organize the Unity scene:
 
 - **Agents** - which is attached to a Unity GameObject (any character within a
   scene) and handles generating its observations, performing the actions it
   receives and assigning a reward (positive / negative) when appropriate. Each
   Agent is linked to a Policy.
-- **Academy** - which orchestrates the observation and decision making process.
-  Within the Academy, several environment-wide parameters such as the rendering
-  quality and the speed at which the environment is run can be specified. The
-  External Communicator lives within the Academy.
 
-Every Learning Environment will always have one global Academy and one Agent for
+Every Learning Environment will always have one Agent for
 every character in the scene. While each Agent must be linked to a Policy, it is
 possible for Agents that have similar observations and actions to have
 the same Policy type. In our sample game, we have two teams each with their own medic.
@@ -327,15 +323,6 @@ inspiration:
 Beyond the flexible training scenarios available, the ML-Agents toolkit includes
 additional features which improve the flexibility and interpretability of the
 training process.
-
-- **On Demand Decision Making** - With the ML-Agents toolkit it is possible to
-  have agents request decisions only when needed as opposed to requesting
-  decisions at every step of the environment. This enables training of turn
-  based games, games where agents must react to events or games where agents can
-  take actions of variable duration. Switching between decision taking at every
-  step and on-demand-decision is one button click away. You can learn more about
-  the on-demand-decision feature
-  [here](Learning-Environment-Design-Agents.md#on-demand-decision-making).
 
 - **Memory-enhanced Agents** - In some scenarios, agents must learn to remember
   the past in order to take the best decision. When an agent only has partial

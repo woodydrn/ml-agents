@@ -4,7 +4,7 @@ To install and use ML-Agents, you need to install Unity, clone this repository a
 install Python with additional dependencies. Each of the subsections below
 overviews each step, in addition to a Docker set-up.
 
-## Install **Unity 2017.4** or Later
+## Install **Unity 2018.4** or Later
 
 [Download](https://store.unity.com/download) and install Unity. If you would
 like to use our Docker set-up (introduced later), make sure to select the _Linux
@@ -34,30 +34,36 @@ git clone --branch latest_release https://github.com/Unity-Technologies/ml-agent
 The `--branch latest_release` option will switch to the tag of the latest stable release.
 Omitting that will get the `master` branch which is potentially unstable.
 
-The `UnitySDK` subdirectory contains the Unity Assets to add to your projects.
-It also contains many [example environments](Learning-Environment-Examples.md)
+The `com.unity.ml-agents` subdirectory contains the core code to add to your projects.
+The `Project` subdirectory contains many [example environments](Learning-Environment-Examples.md)
 to help you get started.
 
 ### Package Installation
-
-If you intend to copy the `UnitySDK` folder in to your project, ensure that
-you have the [Barracuda preview package](https://docs.unity3d.com/Packages/com.unity.barracuda@0.3/manual/index.html) installed.
-
-To install the Barracuda package in Unity **2017.4.x**, you will have to copy the
-`UnityPackageManager` folder under the `UnitySDK` folder to the root directory of your
-project.
-
-To install the Barrcuda package in later versions of Unity, navigate to the Package
-Manager window by navigating to the menu `Window` -> `Package Manager`.  Click on the
-`Adavanced` dropdown menu to the left of the search bar and make sure "Show Preview Packages"
-is checked.  Search for or select the `Barracuda` package and install the latest version.
+ML-Agents C# SDK is transitioning to a Unity Package.  While we are working on getting into the
+official packages list, you can add the `com.unity.ml-agents` package to your project by
+navigating to the menu `Window`  -> `Package Manager`.  In the package manager window click
+on the `+` button.
 
 <p align="center">
-  <img src="images/barracuda-package.png"
-       alt="Barracuda Package Manager"
-       width="710" border="10"
-       height="569" />
+  <img src="images/unity_package_manager_window.png"
+       alt="Linux Build Support"
+       width="500" border="10" />
 </p>
+
+**NOTE:** In Unity 2018.4 it's on the bottom right of the packages list, and in Unity 2019.3 it's on the top left of the packages list.
+
+Select `Add package from disk...` and navigate into the
+`com.unity.ml-agents` folder and select the `package.json` folder.
+
+<p align="center">
+  <img src="images/unity_package_json.png"
+       alt="Linux Build Support"
+       width="500" border="10" />
+</p>
+
+If you are going to follow the examples from our documentation, you can open the `Project`
+folder in Unity and start tinkering immediately.
+
 
 The `ml-agents` subdirectory contains a Python package which provides deep reinforcement
 learning trainers to use with Unity environments.

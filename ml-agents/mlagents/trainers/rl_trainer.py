@@ -3,6 +3,7 @@ import logging
 from typing import Dict
 from collections import defaultdict
 
+from mlagents.trainers.tf_policy import TFPolicy
 from mlagents.trainers.buffer import AgentBuffer
 from mlagents.trainers.trainer import Trainer, UnityTrainerException
 from mlagents.trainers.components.reward_signals import RewardSignalResult
@@ -12,10 +13,9 @@ LOGGER = logging.getLogger("mlagents.trainers")
 RewardSignalResults = Dict[str, RewardSignalResult]
 
 
-class RLTrainer(Trainer):
+class RLTrainer(Trainer):  # pylint: disable=abstract-method
     """
     This class is the base class for trainers that use Reward Signals.
-    Contains methods for adding BrainInfos to the Buffer.
     """
 
     def __init__(self, *args, **kwargs):
@@ -47,7 +47,7 @@ class RLTrainer(Trainer):
             for agent_id in rewards:
                 rewards[agent_id] = 0
 
-    def _update_end_episode_stats(self, agent_id: str) -> None:
+    def _update_end_episode_stats(self, agent_id: str, policy: TFPolicy) -> None:
         self.episode_steps[agent_id] = 0
         for name, rewards in self.collected_rewards.items():
             if name == "environment":
@@ -58,13 +58,20 @@ class RLTrainer(Trainer):
                 rewards[agent_id] = 0
             else:
                 self.stats_reporter.add_stat(
-                    self.policy.reward_signals[name].stat_name, rewards.get(agent_id, 0)
+                    policy.reward_signals[name].stat_name, rewards.get(agent_id, 0)
                 )
                 rewards[agent_id] = 0
 
     def clear_update_buffer(self) -> None:
         """
-        Clear the buffers that have been built up during inference. If
-        we're not training, this should be called instead of update_policy.
+        Clear the buffers that have been built up during inference.
         """
         self.update_buffer.reset_agent()
+
+    def advance(self) -> None:
+        """
+        Steps the trainer, taking in trajectories and updates if ready
+        """
+        super().advance()
+        if not self.should_still_train:
+            self.clear_update_buffer()

@@ -35,7 +35,7 @@ reward_signals:
         strength: 0.01
         gamma: 0.99
         encoding_size: 128
-        demo_path: demos/ExpertPyramid.demo
+        demo_path: Project/Assets/ML-Agents/Examples/Pyramids/Demos/ExpertPyramid.demo
 ```
 
 Each reward signal should define at least two parameters, `strength` and `gamma`, in addition
@@ -160,8 +160,7 @@ Typical Range: `0.8` - `0.9`
 
 #### Demo Path
 
-`demo_path` is the path to your `.demo` file or directory of `.demo` files. See the [imitation learning guide]
-(Training-Imitation-Learning.md).
+`demo_path` is the path to your `.demo` file or directory of `.demo` files. See the [imitation learning guide](Training-Imitation-Learning.md).
 
 #### (Optional) Encoding Size
 

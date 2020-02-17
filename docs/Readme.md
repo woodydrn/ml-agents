@@ -20,8 +20,7 @@
 
 * [Making a New Learning Environment](Learning-Environment-Create-New.md)
 * [Designing a Learning Environment](Learning-Environment-Design.md)
-  * [Agents](Learning-Environment-Design-Agents.md)
-  * [Academy](Learning-Environment-Design-Academy.md)
+* [Designing Agents](Learning-Environment-Design-Agents.md)
 * [Learning Environment Best Practices](Learning-Environment-Best-Practices.md)
 
 ### Advanced Usage
@@ -60,6 +59,18 @@
 * [API Reference](API-Reference.md)
 * [How to use the Python API](Python-API.md)
 * [Wrapping Learning Environment as a Gym (+Baselines/Dopamine Integration)](../gym-unity/README.md)
+
+## Translations
+
+To make the Unity ML-Agents toolkit accessible to the global research and
+Unity developer communities, we're attempting to create and maintain
+translations of our documentation. We've started with translating a subset
+of the documentation to one language (Chinese), but we hope to continue
+translating more pages and to other languages. Consequently,
+we welcome any enhancements and improvements from the community.
+
+* [Chinese](localized/zh-CN/)
+* [Korean](localized/KR/)
 
 ## Deprecated Docs
 We no longer use them ourselves and so they may not be up-to-date.

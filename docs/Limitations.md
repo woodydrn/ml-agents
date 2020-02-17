@@ -16,12 +16,17 @@ making. See
 [Execution Order of Event Functions](https://docs.unity3d.com/Manual/ExecutionOrder.html)
 for more information.
 
+You can control the frequency of Academy stepping by calling
+`Academy.Instance.DisableAutomaticStepping()`, and then calling
+`Academy.Instance.EnvironmentStep()`
+
+### Unity Inference Engine Models
+Currently, only models created with our trainers are supported for running
+ML-Agents with a neural network behavior.
+
 ## Python API
 
 ### Python version
 
 As of version 0.3, we no longer support Python 2.
 
-### TensorFlow support
-
-Currently the Ml-Agents toolkit uses TensorFlow 1.7.1 only.

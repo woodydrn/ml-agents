@@ -17,15 +17,11 @@ steps:
 1. Create an environment for your agents to live in. An environment can range
     from a simple physical simulation containing a few objects to an entire game
     or ecosystem.
-2. Implement an Academy subclass and add it to a GameObject in the Unity scene
-    containing the environment. Your Academy class can implement a few optional
-    methods to update the scene independently of any agents. For example, you can
-    add, move, or delete agents and other entities in the environment.
-3. Implement your Agent subclasses. An Agent subclass defines the code an Agent
+2. Implement your Agent subclasses. An Agent subclass defines the code an Agent
     uses to observe its environment, to carry out assigned actions, and to
     calculate the rewards used for reinforcement training. You can also implement
     optional methods to reset the Agent when it has finished or failed its task.
-4. Add your Agent subclasses to appropriate GameObjects, typically, the object
+3. Add your Agent subclasses to appropriate GameObjects, typically, the object
     in the scene that represents the Agent in the simulation.
 
 **Note:** If you are unfamiliar with Unity, refer to
@@ -46,8 +42,13 @@ importing the ML-Agents assets into it:
     but is the default as of 2018.3.)
 3. In a file system window, navigate to the folder containing your cloned
     ML-Agents repository.
-4. Drag the `ML-Agents` folder from `UnitySDK/Assets` to the Unity
-    Editor Project window.
+4. Open the `manifest.json` file in the `Packages` directory of your project.
+    Add the following line to your project's package dependencies:
+    ```
+        "com.unity.ml-agents" : "file:<path_to_local_ml-agents_repo>/com.unity.ml-agents"
+    ```
+    More information can be found in the [installation instructions](Installation.md) under
+    **Package Installation**.
 
 Your Unity **Project** window should contain the following assets:
 
@@ -67,7 +68,7 @@ agent to seek, and a Sphere to represent the Agent itself.
 3. Select the Floor Plane to view its properties in the Inspector window.
 4. Set Transform to Position = (0, 0, 0), Rotation = (0, 0, 0), Scale = (1, 1, 1).
 5. On the Plane's Mesh Renderer, expand the Materials property and change the
-    default-material to *LightGridFloorSquare* (or any suitable material of your choice).
+    default-material to *GridMatFloor* (or any suitable material of your choice).
 
 (To set a new material, click the small circle icon next to the current material
 name. This opens the **Object Picker** dialog so that you can choose a
@@ -82,7 +83,7 @@ different material from the list of all materials currently in the project.)
 3. Select the Target Cube to view its properties in the Inspector window.
 4. Set Transform to Position = (3, 0.5, 3), Rotation = (0, 0, 0), Scale = (1, 1, 1).
 5. On the Cube's Mesh Renderer, expand the Materials property and change the
-    default-material to *Block*.
+    default-material to *AgentBlue*.
 
 ![The Target Cube in the Inspector window](images/mlagents-NewTutBlock.png)
 
@@ -93,7 +94,7 @@ different material from the list of all materials currently in the project.)
 3. Select the RollerAgent Sphere to view its properties in the Inspector window.
 4. Set Transform to Position = (0, 0.5, 0), Rotation = (0, 0, 0), Scale = (1, 1, 1).
 5. On the Sphere's Mesh Renderer, expand the Materials property and change the
-    default-material to *CheckerSquare*.
+    default-material to *Checkers_Ball*.
 6. Click **Add Component**.
 7. Add the Physics/Rigidbody component to the Sphere.
 
@@ -101,57 +102,6 @@ different material from the list of all materials currently in the project.)
 
 Note that we will create an Agent subclass to add to this GameObject as a
 component later in the tutorial.
-
-### Add an Empty GameObject to Hold the Academy
-
-1. Right click in Hierarchy window, select Create Empty.
-2. Name the GameObject "Academy"
-
-![The scene hierarchy](images/mlagents-NewTutHierarchy.png)
-
-You can adjust the camera angles to give a better view of the scene at runtime.
-The next steps will be to create and add the ML-Agent components.
-
-## Implement an Academy
-
-The Academy object coordinates the ML-Agents in the scene and drives the
-decision-making portion of the simulation loop. Every ML-Agent scene needs one
-Academy instance. Since the base Academy class is abstract, you must make your
-own subclass even if you don't need to use any of the methods for a particular
-environment.
-
-First, add a New Script component to the Academy GameObject created earlier:
-
-1. Select the Academy GameObject to view it in the Inspector window.
-2. Click **Add Component**.
-3. Click **New Script** in the list of components (at the bottom).
-4. Name the script "RollerAcademy".
-5. Click **Create and Add**.
-
-Next, edit the new `RollerAcademy` script:
-
-1. In the Unity Project window, double-click the `RollerAcademy` script to open
-    it in your code editor. (By default new scripts are placed directly in the
-    **Assets** folder.)
-2. In the code editor, add the statement, `using MLAgents;`.
-3. Change the base class from `MonoBehaviour` to `Academy`.
-4. Delete the `Start()` and `Update()` methods that were added by default.
-
-In such a basic scene, we don't need the Academy to initialize, reset, or
-otherwise control any objects in the environment so we have the simplest
-possible Academy implementation:
-
-```csharp
-using MLAgents;
-
-public class RollerAcademy : Academy { }
-```
-
-The default settings for the Academy properties are also fine for this
-environment, so we don't need to change anything for the RollerAcademy component
-in the Inspector window.
-
-![The Academy properties](images/mlagents-NewTutAcademy.png)
 
 ## Implement an Agent
 
@@ -175,13 +125,6 @@ Then, edit the new `RollerAgent` script:
 So far, these are the basic steps that you would use to add ML-Agents to any
 Unity project. Next, we will add the logic that will let our Agent learn to roll
 to the cube using reinforcement learning.
-
-In this simple scenario, we don't use the Academy object to control the
-environment. If we wanted to change the environment, for example change the size
-of the floor or add or remove agents or other objects before or during the
-simulation, we could implement the appropriate methods in the Academy. Instead,
-we will have the Agent do all the work of resetting itself and the target when
-it succeeds or falls trying.
 
 ### Initialization and Resetting the Agent
 
@@ -239,7 +182,7 @@ public class RollerAgent : Agent
 }
 ```
 
-Next, let's implement the `Agent.CollectObservations()` method.
+Next, let's implement the `Agent.CollectObservations(VectorSensor sensor)` method.
 
 ### Observing the Environment
 
@@ -255,13 +198,13 @@ In our case, the information our Agent collects includes:
 * Position of the target.
 
 ```csharp
-AddVectorObs(Target.position);
+sensor.AddObservation(Target.position);
 ```
 
 * Position of the Agent itself.
 
 ```csharp
-AddVectorObs(this.transform.position);
+sensor.AddObservation(this.transform.position);
 ```
 
 * The velocity of the Agent. This helps the Agent learn to control its speed so
@@ -269,23 +212,23 @@ AddVectorObs(this.transform.position);
 
 ```csharp
 // Agent velocity
-AddVectorObs(rBody.velocity.x);
-AddVectorObs(rBody.velocity.z);
+sensor.AddObservation(rBody.velocity.x);
+sensor.AddObservation(rBody.velocity.z);
 ```
 
 In total, the state observation contains 8 values and we need to use the
 continuous state space when we get around to setting the Brain properties:
 
 ```csharp
-public override void CollectObservations()
+public override void CollectObservations(VectorSensor sensor)
 {
     // Target and Agent positions
-    AddVectorObs(Target.position);
-    AddVectorObs(this.transform.position);
+    sensor.AddObservation(Target.position);
+    sensor.AddObservation(this.transform.position);
 
     // Agent velocity
-    AddVectorObs(rBody.velocity.x);
-    AddVectorObs(rBody.velocity.z);
+    sensor.AddObservation(rBody.velocity.x);
+    sensor.AddObservation(rBody.velocity.z);
 }
 ```
 
@@ -342,14 +285,7 @@ if (distanceToTarget < 1.42f)
 }
 ```
 
-**Note:** When you mark an Agent as done, it stops its activity until it is
-reset. You can have the Agent reset immediately, by setting the
-Agent.ResetOnDone property to true in the inspector or you can wait for the
-Academy to reset the environment. This RollerBall environment relies on the
-`ResetOnDone` mechanism and doesn't set a `Max Steps` limit for the Academy (so
-it never resets the environment).
-
-Finally, if the Agent falls off the platform,  set the Agent to done so that it can reset itself:
+Finally, if the Agent falls off the platform, set the Agent to done so that it can reset itself:
 
 ```csharp
 // Fell off platform
@@ -407,11 +343,12 @@ with our Agent code.
 
 1. Select the **RollerAgent** GameObject to show its properties in the Inspector
     window.
-2. Change **Decision Interval** from `1` to `10`.
-3. Drag the Target GameObject from the Hierarchy window to the RollerAgent
+2. Add the Decision Requester script with the Add Component button from the RollerAgent Inspector.
+3. Change **Decision Period** to `10`.
+4. Drag the Target GameObject from the Hierarchy window to the RollerAgent
     Target field.
-4. Add the Behavior Parameters script with the Add Component button from the RollerAgent Inspector.
-5. Modify the Behavior Parameters of the Agent :
+5. Add the Behavior Parameters script with the Add Component button from the RollerAgent Inspector.
+6. Modify the Behavior Parameters of the Agent :
   * `Behavior Name` to *RollerBallBrain*
   * `Vector Observation` `Space Size` = 8
   * `Vector Action` `Space Type` = **Continuous**
@@ -560,8 +497,5 @@ to use Unity ML-Agents: an Academy and one or more Agents.
 
 Keep in mind:
 
-* There can only be one Academy game object in a scene.
 * If you are using multiple training areas, make sure all the Agents have the same `Behavior Name`
 and `Behavior Parameters`
-
-

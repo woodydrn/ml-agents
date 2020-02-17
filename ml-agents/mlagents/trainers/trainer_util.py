@@ -1,3 +1,4 @@
+import os
 import yaml
 from typing import Any, Dict, TextIO
 import logging
@@ -5,9 +6,9 @@ import logging
 from mlagents.trainers.meta_curriculum import MetaCurriculum
 from mlagents.trainers.exception import TrainerConfigError
 from mlagents.trainers.trainer import Trainer, UnityTrainerException
-from mlagents.trainers.brain import BrainParameters
 from mlagents.trainers.ppo.trainer import PPOTrainer
 from mlagents.trainers.sac.trainer import SACTrainer
+from mlagents.trainers.ghost.trainer import GhostTrainer
 
 logger = logging.getLogger("mlagents.trainers")
 
@@ -37,10 +38,10 @@ class TrainerFactory:
         self.meta_curriculum = meta_curriculum
         self.multi_gpu = multi_gpu
 
-    def generate(self, brain_parameters: BrainParameters) -> Trainer:
+    def generate(self, brain_name: str) -> Trainer:
         return initialize_trainer(
             self.trainer_config,
-            brain_parameters,
+            brain_name,
             self.summaries_dir,
             self.run_id,
             self.model_path,
@@ -55,7 +56,7 @@ class TrainerFactory:
 
 def initialize_trainer(
     trainer_config: Any,
-    brain_parameters: BrainParameters,
+    brain_name: str,
     summaries_dir: str,
     run_id: str,
     model_path: str,
@@ -71,7 +72,7 @@ def initialize_trainer(
     some general training session options.
 
     :param trainer_config: Original trainer configuration loaded from YAML
-    :param brain_parameters: BrainParameters provided by the Unity environment
+    :param brain_name: Name of the brain to be associated with trainer
     :param summaries_dir: Directory to store trainer summary statistics
     :param run_id: Run ID to associate with this training run
     :param model_path: Path to save the model
@@ -83,7 +84,6 @@ def initialize_trainer(
     :param multi_gpu: Whether to use multi-GPU training
     :return:
     """
-    brain_name = brain_parameters.brain_name
     if "default" not in trainer_config and brain_name not in trainer_config:
         raise TrainerConfigError(
             f'Trainer config must have either a "default" section, or a section for the brain name ({brain_name}). '
@@ -104,14 +104,14 @@ def initialize_trainer(
 
     min_lesson_length = 1
     if meta_curriculum:
-        if brain_name in meta_curriculum.brains_to_curriculums:
-            min_lesson_length = meta_curriculum.brains_to_curriculums[
+        if brain_name in meta_curriculum.brains_to_curricula:
+            min_lesson_length = meta_curriculum.brains_to_curricula[
                 brain_name
             ].min_lesson_length
         else:
             logger.warning(
                 f"Metacurriculum enabled, but no curriculum for brain {brain_name}. "
-                f"Brains with curricula: {meta_curriculum.brains_to_curriculums.keys()}. "
+                f"Brains with curricula: {meta_curriculum.brains_to_curricula.keys()}. "
             )
 
     trainer: Trainer = None  # type: ignore  # will be set to one of these, or raise
@@ -129,7 +129,7 @@ def initialize_trainer(
         )
     elif trainer_type == "ppo":
         trainer = PPOTrainer(
-            brain_parameters,
+            brain_name,
             min_lesson_length,
             trainer_parameters,
             train_model,
@@ -140,7 +140,7 @@ def initialize_trainer(
         )
     elif trainer_type == "sac":
         trainer = SACTrainer(
-            brain_parameters,
+            brain_name,
             min_lesson_length,
             trainer_parameters,
             train_model,
@@ -148,9 +148,20 @@ def initialize_trainer(
             seed,
             run_id,
         )
+
     else:
         raise TrainerConfigError(
             f'The trainer config contains an unknown trainer type "{trainer_type}" for brain {brain_name}'
+        )
+
+    if "self_play" in trainer_parameters:
+        trainer = GhostTrainer(
+            trainer,
+            brain_name,
+            min_lesson_length,
+            trainer_parameters,
+            train_model,
+            run_id,
         )
     return trainer
 
@@ -160,7 +171,8 @@ def load_config(config_path: str) -> Dict[str, Any]:
         with open(config_path) as data_file:
             return _load_config(data_file)
     except IOError:
-        raise TrainerConfigError(f"Config file could not be found at {config_path}.")
+        abs_path = os.path.abspath(config_path)
+        raise TrainerConfigError(f"Config file could not be found at {abs_path}.")
     except UnicodeDecodeError:
         raise TrainerConfigError(
             f"There was an error decoding Config file from {config_path}. "
