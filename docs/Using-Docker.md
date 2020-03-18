@@ -16,8 +16,15 @@ agents using camera-based visual observations might be slower.
 
 ## Requirements
 
-- Unity _Linux Build Support_ Component
 - [Docker](https://www.docker.com)
+- Unity _Linux Build Support_ Component. Make sure to select the _Linux
+Build Support_ component when installing Unity.
+
+<p align="center">
+  <img src="images/unity_linux_build_support.png"
+       alt="Linux Build Support"
+       width="500" border="10" />
+</p>
 
 ## Setup
 
@@ -41,7 +48,7 @@ Using Docker for ML-Agents involves three steps: building the Unity environment
 with specific flags, building a Docker container and, finally, running the
 container. If you are not familiar with building a Unity environment for
 ML-Agents, please read through our [Getting Started with the 3D Balance Ball
-Example](Getting-Started-with-Balance-Ball.md) guide first.
+Example](Getting-Started.md) guide first.
 
 ### Build the Environment (Optional)
 

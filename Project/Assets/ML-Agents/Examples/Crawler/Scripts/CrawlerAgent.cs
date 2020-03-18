@@ -1,6 +1,7 @@
 using UnityEngine;
 using MLAgents;
 using MLAgentsExamples;
+using MLAgents.Sensors;
 
 [RequireComponent(typeof(JointDriveController))] // Required to set joint forces
 public class CrawlerAgent : Agent
@@ -51,7 +52,7 @@ public class CrawlerAgent : Agent
     Quaternion m_LookRotation;
     Matrix4x4 m_TargetDirMatrix;
 
-    public override void InitializeAgent()
+    public override void Initialize()
     {
         m_JdController = GetComponent<JointDriveController>();
         m_DirToTarget = target.position - body.position;
@@ -146,7 +147,7 @@ public class CrawlerAgent : Agent
         target.position = newTargetPos + ground.position;
     }
 
-    public override void AgentAction(float[] vectorAction)
+    public override void OnActionReceived(float[] vectorAction)
     {
         // The dictionary with all the body parts in it are in the jdController
         var bpDict = m_JdController.bodyPartsDict;
@@ -250,7 +251,7 @@ public class CrawlerAgent : Agent
     /// <summary>
     /// Loop over body parts and reset them to initial conditions.
     /// </summary>
-    public override void AgentReset()
+    public override void OnEpisodeBegin()
     {
         if (m_DirToTarget != Vector3.zero)
         {
