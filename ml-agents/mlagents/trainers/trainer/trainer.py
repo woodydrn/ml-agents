@@ -1,10 +1,10 @@
 # # Unity ML-Agents Toolkit
-import logging
 from typing import Dict, List, Deque, Any
 import abc
 
 from collections import deque
 
+from mlagents_envs.logging_util import get_logger
 from mlagents.model_serialization import export_policy_model, SerializationSettings
 from mlagents.trainers.policy.tf_policy import TFPolicy
 from mlagents.trainers.stats import StatsReporter
@@ -13,8 +13,10 @@ from mlagents.trainers.agent_processor import AgentManagerQueue
 from mlagents.trainers.brain import BrainParameters
 from mlagents.trainers.policy import Policy
 from mlagents.trainers.exception import UnityTrainerException
+from mlagents.trainers.behavior_id_utils import BehaviorIdentifiers
 
-logger = logging.getLogger("mlagents.trainers")
+
+logger = get_logger(__name__)
 
 
 class Trainer(abc.ABC):
@@ -130,14 +132,18 @@ class Trainer(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def create_policy(self, brain_parameters: BrainParameters) -> TFPolicy:
+    def create_policy(
+        self, parsed_behavior_id: BehaviorIdentifiers, brain_parameters: BrainParameters
+    ) -> TFPolicy:
         """
         Creates policy
         """
         pass
 
     @abc.abstractmethod
-    def add_policy(self, name_behavior_id: str, policy: TFPolicy) -> None:
+    def add_policy(
+        self, parsed_behavior_id: BehaviorIdentifiers, policy: TFPolicy
+    ) -> None:
         """
         Adds policy to trainer.
         """

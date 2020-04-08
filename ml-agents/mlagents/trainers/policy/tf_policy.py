@@ -1,19 +1,19 @@
-import logging
 from typing import Any, Dict, List, Optional
 import abc
 import numpy as np
 from mlagents.tf_utils import tf
 from mlagents import tf_utils
 from mlagents_envs.exception import UnityException
+from mlagents_envs.logging_util import get_logger
 from mlagents.trainers.policy import Policy
 from mlagents.trainers.action_info import ActionInfo
 from mlagents.trainers.trajectory import SplitObservations
 from mlagents.trainers.brain_conversion_utils import get_global_agent_id
-from mlagents_envs.base_env import BatchedStepResult
+from mlagents_envs.base_env import DecisionSteps
 from mlagents.trainers.models import ModelUtils
 
 
-logger = logging.getLogger("mlagents.trainers")
+logger = get_logger(__name__)
 
 
 class UnityPolicyException(UnityException):
@@ -63,6 +63,7 @@ class TFPolicy(Policy):
         if self.use_continuous_act:
             self.num_branches = self.brain.vector_action_space_size[0]
         self.model_path = trainer_parameters["model_path"]
+        self.initialize_path = trainer_parameters.get("init_path", None)
         self.keep_checkpoints = trainer_parameters.get("keep_checkpoints", 5)
         self.graph = tf.Graph()
         self.sess = tf.Session(
@@ -109,22 +110,52 @@ class TFPolicy(Policy):
             init = tf.global_variables_initializer()
             self.sess.run(init)
 
-    def _load_graph(self):
+    def _load_graph(self, model_path: str, reset_global_steps: bool = False) -> None:
         with self.graph.as_default():
             self.saver = tf.train.Saver(max_to_keep=self.keep_checkpoints)
-            logger.info("Loading Model for brain {}".format(self.brain.brain_name))
-            ckpt = tf.train.get_checkpoint_state(self.model_path)
-            if ckpt is None:
-                logger.info(
-                    "The model {0} could not be found. Make "
-                    "sure you specified the right "
-                    "--run-id".format(self.model_path)
+            logger.info(
+                "Loading model for brain {} from {}.".format(
+                    self.brain.brain_name, model_path
                 )
-            self.saver.restore(self.sess, ckpt.model_checkpoint_path)
+            )
+            ckpt = tf.train.get_checkpoint_state(model_path)
+            if ckpt is None:
+                raise UnityPolicyException(
+                    "The model {0} could not be loaded. Make "
+                    "sure you specified the right "
+                    "--run-id and that the previous run you are loading from had the same "
+                    "behavior names.".format(model_path)
+                )
+            try:
+                self.saver.restore(self.sess, ckpt.model_checkpoint_path)
+            except tf.errors.NotFoundError:
+                raise UnityPolicyException(
+                    "The model {0} was found but could not be loaded. Make "
+                    "sure the model is from the same version of ML-Agents, has the same behavior parameters, "
+                    "and is using the same trainer configuration as the current run.".format(
+                        model_path
+                    )
+                )
+            if reset_global_steps:
+                logger.info(
+                    "Starting training from step 0 and saving to {}.".format(
+                        self.model_path
+                    )
+                )
+            else:
+                logger.info(
+                    "Resuming training from step {}.".format(self.get_current_step())
+                )
 
     def initialize_or_load(self):
-        if self.load:
-            self._load_graph()
+        # If there is an initialize path, load from that. Else, load from the set model path.
+        # If load is set to True, don't reset steps to 0. Else, do. This allows a user to,
+        # e.g., resume from an initialize path.
+        reset_steps = not self.load
+        if self.initialize_path is not None:
+            self._load_graph(self.initialize_path, reset_global_steps=reset_steps)
+        elif self.load:
+            self._load_graph(self.model_path, reset_global_steps=reset_steps)
         else:
             self._initialize_graph()
 
@@ -144,6 +175,10 @@ class TFPolicy(Policy):
                 self.assign_ops.append(tf.assign(var, assign_ph))
 
     def load_weights(self, values):
+        if len(self.assign_ops) == 0:
+            logger.warning(
+                "Calling load_weights in tf_policy but assign_ops is empty. Did you forget to call init_load_weights?"
+            )
         with self.graph.as_default():
             feed_dict = {}
             for assign_ph, value in zip(self.assign_phs, values):
@@ -151,47 +186,36 @@ class TFPolicy(Policy):
             self.sess.run(self.assign_ops, feed_dict=feed_dict)
 
     def evaluate(
-        self, batched_step_result: BatchedStepResult, global_agent_ids: List[str]
+        self, decision_requests: DecisionSteps, global_agent_ids: List[str]
     ) -> Dict[str, Any]:
         """
         Evaluates policy for the agent experiences provided.
-        :param batched_step_result: BatchedStepResult input to network.
+        :param decision_requests: DecisionSteps input to network.
         :return: Output from policy based on self.inference_dict.
         """
         raise UnityPolicyException("The evaluate function was not implemented.")
 
     def get_action(
-        self, batched_step_result: BatchedStepResult, worker_id: int = 0
+        self, decision_requests: DecisionSteps, worker_id: int = 0
     ) -> ActionInfo:
         """
         Decides actions given observations information, and takes them in environment.
-        :param batched_step_result: A dictionary of brain names and BatchedStepResult from environment.
+        :param decision_requests: A dictionary of brain names and DecisionSteps from environment.
         :param worker_id: In parallel environment training, the unique id of the environment worker that
-            the BatchedStepResult came from. Used to construct a globally unique id for each agent.
+            the DecisionSteps came from. Used to construct a globally unique id for each agent.
         :return: an ActionInfo containing action, memories, values and an object
         to be passed to add experiences
         """
-        if batched_step_result.n_agents() == 0:
+        if len(decision_requests) == 0:
             return ActionInfo.empty()
-
-        agents_done = [
-            agent
-            for agent, done in zip(
-                batched_step_result.agent_id, batched_step_result.done
-            )
-            if done
-        ]
-
-        self.remove_memories(agents_done)
-        self.remove_previous_action(agents_done)
 
         global_agent_ids = [
             get_global_agent_id(worker_id, int(agent_id))
-            for agent_id in batched_step_result.agent_id
+            for agent_id in decision_requests.agent_id
         ]  # For 1-D array, the iterator order is correct.
 
         run_out = self.evaluate(  # pylint: disable=assignment-from-no-return
-            batched_step_result, global_agent_ids
+            decision_requests, global_agent_ids
         )
 
         self.save_memories(global_agent_ids, run_out.get("memory_out"))
@@ -199,7 +223,7 @@ class TFPolicy(Policy):
             action=run_out.get("action"),
             value=run_out.get("value"),
             outputs=run_out,
-            agent_ids=batched_step_result.agent_id,
+            agent_ids=decision_requests.agent_id,
         )
 
     def update(self, mini_batch, num_sequences):
@@ -230,10 +254,7 @@ class TFPolicy(Policy):
             feed_dict[self.vector_in] = vec_vis_obs.vector_observations
         if not self.use_continuous_act:
             mask = np.ones(
-                (
-                    batched_step_result.n_agents(),
-                    np.sum(self.brain.vector_action_space_size),
-                ),
+                (len(batched_step_result), np.sum(self.brain.vector_action_space_size)),
                 dtype=np.float32,
             )
             if batched_step_result.action_mask is not None:
@@ -304,6 +325,16 @@ class TFPolicy(Policy):
         """
         step = self.sess.run(self.global_step)
         return step
+
+    def _set_step(self, step: int) -> int:
+        """
+        Sets current model step to step without creating additional ops.
+        :param step: Step to set the current model step to.
+        :return: The step the model was set to.
+        """
+        current_step = self.get_current_step()
+        # Increment a positive or negative number of steps.
+        return self.increment_step(step - current_step)
 
     def increment_step(self, n_steps):
         """
@@ -379,9 +410,11 @@ class TFPolicy(Policy):
 
     def create_input_placeholders(self):
         with self.graph.as_default():
-            self.global_step, self.increment_step_op, self.steps_to_increment = (
-                ModelUtils.create_global_steps()
-            )
+            (
+                self.global_step,
+                self.increment_step_op,
+                self.steps_to_increment,
+            ) = ModelUtils.create_global_steps()
             self.visual_in = ModelUtils.create_visual_input_placeholders(
                 self.brain.camera_resolutions
             )
