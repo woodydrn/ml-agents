@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import yaml
 from typing import List, Optional
@@ -24,14 +25,23 @@ def get_base_path():
     return os.getcwd()
 
 
+def get_base_output_path():
+    """"
+    Returns the artifact folder to use for yamato jobs.
+    """
+    return os.path.join(get_base_path(), "artifacts")
+
+
 def run_standalone_build(
     base_path: str,
     verbose: bool = False,
     output_path: str = None,
     scene_path: str = None,
+    log_output_path: str = f"{get_base_output_path()}/standalone_build.txt",
 ) -> int:
     """
-    Run BuildStandalonePlayerOSX test to produce a player. The location defaults to Project/testPlayer.
+    Run BuildStandalonePlayerOSX test to produce a player. The location defaults to
+    artifacts/standalone_build/testPlayer.
     """
     unity_exe = get_unity_executable_path()
     print(f"Running BuildStandalonePlayerOSX via {unity_exe}")
@@ -42,18 +52,35 @@ def run_standalone_build(
         f"{base_path}/Project",
         "-batchmode",
         "-executeMethod",
-        "MLAgents.StandaloneBuildTest.BuildStandalonePlayerOSX",
+        "Unity.MLAgents.StandaloneBuildTest.BuildStandalonePlayerOSX",
     ]
-    if verbose:
-        test_args += ["-logfile", "-"]
+
+    os.makedirs(os.path.dirname(log_output_path), exist_ok=True)
+    subprocess.run(["touch", log_output_path])
+    test_args += ["-logfile", log_output_path]
+
     if output_path is not None:
+        output_path = os.path.join(get_base_output_path(), output_path)
         test_args += ["--mlagents-build-output-path", output_path]
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
     if scene_path is not None:
         test_args += ["--mlagents-build-scene-path", scene_path]
     print(f"{' '.join(test_args)} ...")
 
     timeout = 30 * 60  # 30 minutes, just in case
     res: subprocess.CompletedProcess = subprocess.run(test_args, timeout=timeout)
+
+    # Copy the default build name into the artifacts folder.
+    if output_path is None and res.returncode == 0:
+        shutil.move(
+            os.path.join(base_path, "Project", "testPlayer.app"),
+            os.path.join(get_base_output_path(), "testPlayer.app"),
+        )
+
+    # Print if we fail or want verbosity.
+    if verbose or res.returncode != 0:
+        subprocess.run(["cat", log_output_path])
+
     return res.returncode
 
 
@@ -107,11 +134,12 @@ def checkout_csharp_version(csharp_version):
     """
     if csharp_version is None:
         return
+
+    csharp_tag = f"com.unity.ml-agents_{csharp_version}"
     csharp_dirs = ["com.unity.ml-agents", "Project"]
     for csharp_dir in csharp_dirs:
-        subprocess.check_call(
-            f"git checkout {csharp_version} -- {csharp_dir}", shell=True
-        )
+        subprocess.check_call(f"rm -rf {csharp_dir}", shell=True)
+        subprocess.check_call(f"git checkout {csharp_tag} -- {csharp_dir}", shell=True)
 
 
 def undo_git_checkout():
@@ -120,14 +148,46 @@ def undo_git_checkout():
     """
     subprocess.check_call("git reset HEAD .", shell=True)
     subprocess.check_call("git checkout -- .", shell=True)
+    # Ensure the cache isn't polluted with old compiled assemblies.
+    subprocess.check_call("rm -rf Project/Library", shell=True)
 
 
-def override_config_file(src_path, dest_path, **kwargs):
+def override_config_file(src_path, dest_path, overrides):
     """
     Override settings in a trainer config file. For example,
         override_config_file(src_path, dest_path, max_steps=42)
     will copy the config file at src_path to dest_path, but override the max_steps field to 42 for all brains.
     """
+    with open(src_path) as f:
+        configs = yaml.safe_load(f)
+        behavior_configs = configs["behaviors"]
+
+    for config in behavior_configs.values():
+        _override_config_dict(config, overrides)
+
+    with open(dest_path, "w") as f:
+        yaml.dump(configs, f)
+
+
+def _override_config_dict(config, overrides):
+    for key, val in overrides.items():
+        if isinstance(val, dict):
+            _override_config_dict(config[key], val)
+        else:
+            config[key] = val
+
+
+def override_legacy_config_file(python_version, src_path, dest_path, **kwargs):
+    """
+    Override settings in a trainer config file, using an old version of the src_path. For example,
+        override_config_file("0.16.0", src_path, dest_path, max_steps=42)
+    will sync the file at src_path from version 0.16.0, copy it to dest_path, and override the
+    max_steps field to 42 for all brains.
+    """
+    # Sync the old version of the file
+    python_tag = f"python-packages_{python_version}"
+    subprocess.check_call(f"git checkout {python_tag} -- {src_path}", shell=True)
+
     with open(src_path) as f:
         configs = yaml.safe_load(f)
 

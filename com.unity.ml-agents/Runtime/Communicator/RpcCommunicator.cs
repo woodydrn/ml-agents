@@ -8,13 +8,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
-using MLAgents.CommunicatorObjects;
-using MLAgents.Sensors;
-using MLAgents.Policies;
-using MLAgents.SideChannels;
+using Unity.MLAgents.CommunicatorObjects;
+using Unity.MLAgents.Sensors;
+using Unity.MLAgents.Policies;
+using Unity.MLAgents.SideChannels;
 using Google.Protobuf;
 
-namespace MLAgents
+namespace Unity.MLAgents
 {
     /// Responsible for communication with External using gRPC.
     internal class RpcCommunicator : ICommunicator
@@ -27,7 +27,7 @@ namespace MLAgents
 
         List<string> m_BehaviorNames = new List<string>();
         bool m_NeedCommunicateThisStep;
-        WriteAdapter m_WriteAdapter = new WriteAdapter();
+        ObservationWriter m_ObservationWriter = new ObservationWriter();
         Dictionary<string, SensorShapeValidator> m_SensorShapeValidators = new Dictionary<string, SensorShapeValidator>();
         Dictionary<string, List<int>> m_OrderedAgentsRequestingDecisions = new Dictionary<string, List<int>>();
 
@@ -61,6 +61,41 @@ namespace MLAgents
 
         #region Initialization
 
+        internal static bool CheckCommunicationVersionsAreCompatible(
+            string unityCommunicationVersion,
+            string pythonApiVersion,
+            string pythonLibraryVersion)
+        {
+            var unityVersion = new Version(unityCommunicationVersion);
+            var pythonVersion = new Version(pythonApiVersion);
+            if (unityVersion.Major == 0)
+            {
+                if (unityVersion.Major != pythonVersion.Major || unityVersion.Minor != pythonVersion.Minor)
+                {
+                    return false;
+                }
+
+            }
+            else if (unityVersion.Major != pythonVersion.Major)
+            {
+                return false;
+            }
+            else if (unityVersion.Minor != pythonVersion.Minor)
+            {
+                // Even if we initialize, we still want to check to make sure that we inform users of minor version
+                // changes.  This will surface any features that may not work due to minor version incompatibilities.
+                Debug.LogWarningFormat(
+                    "WARNING: The communication API versions between Unity and python differ at the minor version level. " +
+                    "Python API: {0}, Unity API: {1} Python Library Version: {2} .\n" +
+                    "This means that some features may not work unless you upgrade the package with the lower version." +
+                    "Please find the versions that work best together from our release page.\n" +
+                    "https://github.com/Unity-Technologies/ml-agents/releases",
+                    pythonApiVersion, unityCommunicationVersion, pythonLibraryVersion
+                );
+            }
+            return true;
+        }
+
         /// <summary>
         /// Sends the initialization parameters through the Communicator.
         /// Is used by the academy to send initialization parameters to the communicator.
@@ -73,7 +108,8 @@ namespace MLAgents
             {
                 Name = initParameters.name,
                 PackageVersion = initParameters.unityPackageVersion,
-                CommunicationVersion = initParameters.unityCommunicationVersion
+                CommunicationVersion = initParameters.unityCommunicationVersion,
+                Capabilities = initParameters.CSharpCapabilities.ToProto()
             };
 
             UnityInputProto input;
@@ -87,17 +123,23 @@ namespace MLAgents
                     },
                     out input);
 
+                var pythonCommunicationVersion = initializationInput.RlInitializationInput.CommunicationVersion;
+                var pythonPackageVersion = initializationInput.RlInitializationInput.PackageVersion;
+                var unityCommunicationVersion = initParameters.unityCommunicationVersion;
+
+                var communicationIsCompatible = CheckCommunicationVersionsAreCompatible(unityCommunicationVersion,
+                    pythonCommunicationVersion,
+                    pythonPackageVersion);
+
                 // Initialization succeeded part-way. The most likely cause is a mismatch between the communicator
                 // API strings, so log an explicit warning if that's the case.
                 if (initializationInput != null && input == null)
                 {
-                    var pythonCommunicationVersion = initializationInput.RlInitializationInput.CommunicationVersion;
-                    var pythonPackageVersion = initializationInput.RlInitializationInput.PackageVersion;
-                    if (pythonCommunicationVersion != initParameters.unityCommunicationVersion)
+                    if (!communicationIsCompatible)
                     {
                         Debug.LogWarningFormat(
-                            "Communication protocol between python ({0}) and Unity ({1}) don't match. " +
-                            "Python library version: {2}.",
+                            "Communication protocol between python ({0}) and Unity ({1}) have different " +
+                            "versions which make them incompatible. Python library version: {2}.",
                             pythonCommunicationVersion, initParameters.unityCommunicationVersion,
                             pythonPackageVersion
                         );
@@ -157,7 +199,7 @@ namespace MLAgents
 
         void UpdateEnvironmentWithInput(UnityRLInputProto rlInput)
         {
-            SideChannelUtils.ProcessSideChannelData(rlInput.SideChannel.ToArray());
+            SideChannelsManager.ProcessSideChannelData(rlInput.SideChannel.ToArray());
             SendCommandEvent(rlInput.Command);
         }
 
@@ -281,7 +323,7 @@ namespace MLAgents
                 {
                     foreach (var sensor in sensors)
                     {
-                        var obsProto = sensor.GetObservationProto(m_WriteAdapter);
+                        var obsProto = sensor.GetObservationProto(m_ObservationWriter);
                         agentInfoProto.Observations.Add(obsProto);
                     }
                 }
@@ -324,7 +366,7 @@ namespace MLAgents
                 message.RlInitializationOutput = tempUnityRlInitializationOutput;
             }
 
-            byte[] messageAggregated = SideChannelUtils.GetSideChannelMessage();
+            byte[] messageAggregated = SideChannelsManager.GetSideChannelMessage();
             message.RlOutput.SideChannel = ByteString.CopyFrom(messageAggregated);
 
             var input = Exchange(message);

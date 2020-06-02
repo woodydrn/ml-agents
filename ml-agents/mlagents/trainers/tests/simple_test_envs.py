@@ -8,6 +8,7 @@ from mlagents_envs.base_env import (
     DecisionSteps,
     TerminalSteps,
     ActionType,
+    BehaviorMapping,
 )
 from mlagents_envs.tests.test_rpc_utils import proto_from_steps_and_action
 from mlagents_envs.communicator_objects.agent_info_action_pair_pb2 import (
@@ -94,11 +95,12 @@ class SimpleEnvironment(BaseEnv):
             obs.append(np.ones((1,) + self.vis_obs_size, dtype=np.float32) * value)
         return obs
 
-    def get_behavior_names(self):
-        return self.names
-
-    def get_behavior_spec(self, behavior_name):
-        return self.behavior_spec
+    @property
+    def behavior_specs(self):
+        behavior_dict = {}
+        for n in self.names:
+            behavior_dict[n] = self.behavior_spec
+        return BehaviorMapping(behavior_dict)
 
     def set_action_for_agent(self, behavior_name, agent_id, action):
         pass
@@ -150,7 +152,6 @@ class SimpleEnvironment(BaseEnv):
         self.goal[name] = self.random.choice([-1, 1])
         self.positions[name] = [0.0 for _ in range(self.action_size)]
         self.step_count[name] = 0
-        self.final_rewards[name].append(self.rewards[name])
         self.rewards[name] = 0
         self.agent_id[name] = self.agent_id[name] + 1
 
@@ -164,6 +165,7 @@ class SimpleEnvironment(BaseEnv):
         decision_step = DecisionSteps(m_vector_obs, m_reward, m_agent_id, action_mask)
         terminal_step = TerminalSteps.empty(self.behavior_spec)
         if done:
+            self.final_rewards[name].append(self.rewards[name])
             self._reset_agent(name)
             new_vector_obs = self._make_obs(self.goal[name])
             (
@@ -232,6 +234,7 @@ class MemoryEnvironment(SimpleEnvironment):
         decision_step = DecisionSteps(m_vector_obs, m_reward, m_agent_id, action_mask)
         terminal_step = TerminalSteps.empty(self.behavior_spec)
         if done:
+            self.final_rewards[name].append(self.rewards[name])
             self._reset_agent(name)
             recurrent_obs_val = (
                 self.goal[name] if self.step_count[name] <= self.num_show_steps else 0

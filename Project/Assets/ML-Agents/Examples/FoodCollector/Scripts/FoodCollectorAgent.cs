@@ -1,7 +1,6 @@
 using UnityEngine;
-using MLAgents;
-using MLAgents.Sensors;
-using MLAgents.SideChannels;
+using Unity.MLAgents;
+using Unity.MLAgents.Sensors;
 
 public class FoodCollectorAgent : Agent
 {
@@ -29,13 +28,14 @@ public class FoodCollectorAgent : Agent
     public bool contribute;
     public bool useVectorObs;
 
+    EnvironmentParameters m_ResetParams;
 
     public override void Initialize()
     {
         m_AgentRb = GetComponent<Rigidbody>();
         m_MyArea = area.GetComponent<FoodCollectorArea>();
         m_FoodCollecterSettings = FindObjectOfType<FoodCollectorSettings>();
-
+        m_ResetParams = Academy.Instance.EnvironmentParameters;
         SetResetParameters();
     }
 
@@ -207,27 +207,25 @@ public class FoodCollectorAgent : Agent
         MoveAgent(vectorAction);
     }
 
-    public override float[] Heuristic()
+    public override void Heuristic(float[] actionsOut)
     {
-        var action = new float[4];
         if (Input.GetKey(KeyCode.D))
         {
-            action[2] = 2f;
+            actionsOut[2] = 2f;
         }
         if (Input.GetKey(KeyCode.W))
         {
-            action[0] = 1f;
+            actionsOut[0] = 1f;
         }
         if (Input.GetKey(KeyCode.A))
         {
-            action[2] = 1f;
+            actionsOut[2] = 1f;
         }
         if (Input.GetKey(KeyCode.S))
         {
-            action[0] = 2f;
+            actionsOut[0] = 2f;
         }
-        action[3] = Input.GetKey(KeyCode.Space) ? 1.0f : 0.0f;
-        return action;
+        actionsOut[3] = Input.GetKey(KeyCode.Space) ? 1.0f : 0.0f;
     }
 
     public override void OnEpisodeBegin()
@@ -273,12 +271,12 @@ public class FoodCollectorAgent : Agent
 
     public void SetLaserLengths()
     {
-        m_LaserLength = SideChannelUtils.GetSideChannel<FloatPropertiesChannel>().GetPropertyWithDefault("laser_length", 1.0f);
+        m_LaserLength = m_ResetParams.GetWithDefault("laser_length", 1.0f);
     }
 
     public void SetAgentScale()
     {
-        float agentScale = SideChannelUtils.GetSideChannel<FloatPropertiesChannel>().GetPropertyWithDefault("agent_scale", 1.0f);
+        float agentScale = m_ResetParams.GetWithDefault("agent_scale", 1.0f);
         gameObject.transform.localScale = new Vector3(agentScale, agentScale, agentScale);
     }
 

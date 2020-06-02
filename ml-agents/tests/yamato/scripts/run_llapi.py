@@ -7,7 +7,7 @@ from mlagents_envs.side_channel.engine_configuration_channel import (
 )
 
 
-def main(env_name):
+def test_run_environment(env_name):
     """
     Run the low-level API test using the specified environment
     :param env_name: Name of the Unity environment binary to launch
@@ -17,7 +17,7 @@ def main(env_name):
         file_name=env_name,
         side_channels=[engine_configuration_channel],
         no_graphics=True,
-        args=["-logFile", "-"],
+        additional_args=["-logFile", "-"],
     )
 
     try:
@@ -25,8 +25,8 @@ def main(env_name):
         env.reset()
 
         # Set the default brain to work with
-        group_name = env.get_behavior_names()[0]
-        group_spec = env.get_behavior_spec(group_name)
+        group_name = list(env.behavior_specs.keys())[0]
+        group_spec = env.behavior_specs[group_name]
 
         # Set the time scale of the engine
         engine_configuration_channel.set_configuration_parameters(time_scale=3.0)
@@ -71,7 +71,7 @@ def main(env_name):
                 else:
                     # Should never happen
                     action = None
-                if tracked_agent == -1 and len(decision_steps) > 1:
+                if tracked_agent == -1 and len(decision_steps) >= 1:
                     tracked_agent = decision_steps.agent_id[0]
                 env.set_actions(group_name, action)
                 env.step()
@@ -87,8 +87,40 @@ def main(env_name):
         env.close()
 
 
+def test_closing(env_name):
+    """
+    Run the low-level API and close the environment
+    :param env_name: Name of the Unity environment binary to launch
+    """
+    try:
+        env1 = UnityEnvironment(
+            file_name=env_name,
+            base_port=5006,
+            no_graphics=True,
+            additional_args=["-logFile", "-"],
+        )
+        env1.close()
+        env1 = UnityEnvironment(
+            file_name=env_name,
+            base_port=5006,
+            no_graphics=True,
+            additional_args=["-logFile", "-"],
+        )
+        env2 = UnityEnvironment(
+            file_name=env_name,
+            base_port=5007,
+            no_graphics=True,
+            additional_args=["-logFile", "-"],
+        )
+        env2.reset()
+    finally:
+        env1.close()
+        env2.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="Project/testPlayer")
+    parser.add_argument("--env", default="artifacts/testPlayer")
     args = parser.parse_args()
-    main(args.env)
+    test_run_environment(args.env)
+    test_closing(args.env)

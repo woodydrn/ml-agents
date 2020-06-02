@@ -6,9 +6,11 @@ import time
 
 from .yamato_utils import (
     get_base_path,
+    get_base_output_path,
     run_standalone_build,
     init_venv,
     override_config_file,
+    override_legacy_config_file,
     checkout_csharp_version,
     undo_git_checkout,
 )
@@ -20,7 +22,8 @@ def run_training(python_version, csharp_version):
     print(
         f"Running training with python={python_version or latest} and c#={csharp_version or latest}"
     )
-    nn_file_expected = f"./models/{run_id}/3DBall.nn"
+    output_dir = "models" if python_version else "results"
+    nn_file_expected = f"./{output_dir}/{run_id}/3DBall.nn"
     if os.path.exists(nn_file_expected):
         # Should never happen - make sure nothing leftover from an old test.
         print("Artifacts from previous build found!")
@@ -34,9 +37,12 @@ def run_training(python_version, csharp_version):
     if csharp_version is not None:
         # We can't rely on the old C# code recognizing the commandline argument to set the output
         # So rename testPlayer (containing the most recent build) to something else temporarily
-        full_player_path = os.path.join("Project", "testPlayer.app")
-        temp_player_path = os.path.join("Project", "temp_testPlayer.app")
-        final_player_path = os.path.join("Project", f"testPlayer_{csharp_version}.app")
+        artifact_path = get_base_output_path()
+        full_player_path = os.path.join(artifact_path, "testPlayer.app")
+        temp_player_path = os.path.join(artifact_path, "temp_testPlayer.app")
+        final_player_path = os.path.join(
+            artifact_path, f"testPlayer_{csharp_version}.app"
+        )
 
         os.rename(full_player_path, temp_player_path)
 
@@ -58,16 +64,22 @@ def run_training(python_version, csharp_version):
 
     # Copy the default training config but override the max_steps parameter,
     # and reduce the batch_size and buffer_size enough to ensure an update step happens.
-    override_config_file(
-        "config/trainer_config.yaml",
-        "override.yaml",
-        max_steps=100,
-        batch_size=10,
-        buffer_size=10,
-    )
+    yaml_out = "override.yaml"
+    if python_version:
+        overrides = {"max_steps": 100, "batch_size": 10, "buffer_size": 10}
+        override_legacy_config_file(
+            python_version, "config/trainer_config.yaml", yaml_out, **overrides
+        )
+    else:
+        overrides = {
+            "hyperparameters": {"batch_size": 10, "buffer_size": 10},
+            "max_steps": 100,
+        }
+        override_config_file("config/ppo/3DBall.yaml", yaml_out, overrides)
 
     mla_learn_cmd = (
-        f"mlagents-learn override.yaml --train --env=Project/{standalone_player_path} "
+        f"mlagents-learn {yaml_out} --force --env="
+        f"{os.path.join(get_base_output_path(), standalone_player_path)} "
         f"--run-id={run_id} --no-graphics --env-args -logFile -"
     )  # noqa
     res = subprocess.run(
