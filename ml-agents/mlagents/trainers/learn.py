@@ -5,26 +5,25 @@ import os
 import numpy as np
 import json
 
-from typing import Callable, Optional, List, Dict
+from typing import Callable, Optional, List
 
 import mlagents.trainers
 import mlagents_envs
 from mlagents import tf_utils
 from mlagents.trainers.trainer_controller import TrainerController
-from mlagents.trainers.meta_curriculum import MetaCurriculum
+from mlagents.trainers.environment_parameter_manager import EnvironmentParameterManager
 from mlagents.trainers.trainer_util import TrainerFactory, handle_existing_directories
 from mlagents.trainers.stats import (
     TensorboardWriter,
-    CSVWriter,
     StatsReporter,
     GaugeWriter,
     ConsoleWriter,
 )
-from mlagents.trainers.cli_utils import parser
+from mlagents.trainers.cli_utils import parser, DetectDefault
 from mlagents_envs.environment import UnityEnvironment
-from mlagents.trainers.sampler_class import SamplerManager
-from mlagents.trainers.exception import SamplerException
 from mlagents.trainers.settings import RunOptions
+
+from mlagents.trainers.training_status import GlobalTrainingStatus
 from mlagents_envs.base_env import BaseEnv
 from mlagents.trainers.subprocess_env_manager import SubprocessEnvManager
 from mlagents_envs.side_channel.side_channel import SideChannel
@@ -37,6 +36,8 @@ from mlagents_envs.timers import (
 from mlagents_envs import logging_util
 
 logger = logging_util.get_logger(__name__)
+
+TRAINING_STATUS_FILE_NAME = "training_status.json"
 
 
 def get_version_string() -> str:
@@ -67,8 +68,8 @@ def run_training(run_seed: int, options: RunOptions) -> None:
         base_path = "results"
         write_path = os.path.join(base_path, checkpoint_settings.run_id)
         maybe_init_path = (
-            os.path.join(base_path, checkpoint_settings.run_id)
-            if checkpoint_settings.initialize_from
+            os.path.join(base_path, checkpoint_settings.initialize_from)
+            if checkpoint_settings.initialize_from is not None
             else None
         )
         run_logs_dir = os.path.join(write_path, "run_logs")
@@ -82,22 +83,19 @@ def run_training(run_seed: int, options: RunOptions) -> None:
         )
         # Make run logs directory
         os.makedirs(run_logs_dir, exist_ok=True)
-        # Configure CSV, Tensorboard Writers and StatsReporter
-        # We assume reward and episode length are needed in the CSV.
-        csv_writer = CSVWriter(
-            write_path,
-            required_fields=[
-                "Environment/Cumulative Reward",
-                "Environment/Episode Length",
-            ],
-        )
+        # Load any needed states
+        if checkpoint_settings.resume:
+            GlobalTrainingStatus.load_state(
+                os.path.join(run_logs_dir, "training_status.json")
+            )
+
+        # Configure Tensorboard Writers and StatsReporter
         tb_writer = TensorboardWriter(
             write_path, clear_past_data=not checkpoint_settings.resume
         )
         gauge_write = GaugeWriter()
         console_writer = ConsoleWriter()
         StatsReporter.add_writer(tb_writer)
-        StatsReporter.add_writer(csv_writer)
         StatsReporter.add_writer(gauge_write)
         StatsReporter.add_writer(console_writer)
 
@@ -122,34 +120,29 @@ def run_training(run_seed: int, options: RunOptions) -> None:
         env_manager = SubprocessEnvManager(
             env_factory, engine_config, env_settings.num_envs
         )
-        maybe_meta_curriculum = try_create_meta_curriculum(
-            options.curriculum, env_manager, checkpoint_settings.lesson
+        env_parameter_manager = EnvironmentParameterManager(
+            options.environment_parameters, run_seed, restore=checkpoint_settings.resume
         )
-        sampler_manager, resampling_interval = create_sampler_manager(
-            options.parameter_randomization, run_seed
-        )
+
         trainer_factory = TrainerFactory(
-            options.behaviors,
-            checkpoint_settings.run_id,
-            write_path,
-            not checkpoint_settings.inference,
-            checkpoint_settings.resume,
-            run_seed,
-            maybe_init_path,
-            maybe_meta_curriculum,
-            False,
+            trainer_config=options.behaviors,
+            output_path=write_path,
+            train_model=not checkpoint_settings.inference,
+            load_model=checkpoint_settings.resume,
+            seed=run_seed,
+            param_manager=env_parameter_manager,
+            init_path=maybe_init_path,
+            multi_gpu=False,
+            force_torch="torch" in DetectDefault.non_default_args,
         )
         # Create controller and begin training.
         tc = TrainerController(
             trainer_factory,
             write_path,
             checkpoint_settings.run_id,
-            checkpoint_settings.save_freq,
-            maybe_meta_curriculum,
+            env_parameter_manager,
             not checkpoint_settings.inference,
             run_seed,
-            sampler_manager,
-            resampling_interval,
         )
 
     # Begin training
@@ -159,6 +152,7 @@ def run_training(run_seed: int, options: RunOptions) -> None:
         env_manager.close()
         write_run_options(write_path, options)
         write_timing_tree(run_logs_dir)
+        write_training_status(run_logs_dir)
 
 
 def write_run_options(output_dir: str, run_options: RunOptions) -> None:
@@ -175,6 +169,10 @@ def write_run_options(output_dir: str, run_options: RunOptions) -> None:
         )
 
 
+def write_training_status(output_dir: str) -> None:
+    GlobalTrainingStatus.save_state(os.path.join(output_dir, TRAINING_STATUS_FILE_NAME))
+
+
 def write_timing_tree(output_dir: str) -> None:
     timing_path = os.path.join(output_dir, "timers.json")
     try:
@@ -184,41 +182,6 @@ def write_timing_tree(output_dir: str) -> None:
         logger.warning(
             f"Unable to save to {timing_path}. Make sure the directory exists"
         )
-
-
-def create_sampler_manager(sampler_config, run_seed=None):
-    resample_interval = None
-    if sampler_config is not None:
-        if "resampling-interval" in sampler_config:
-            # Filter arguments that do not exist in the environment
-            resample_interval = sampler_config.pop("resampling-interval")
-            if (resample_interval <= 0) or (not isinstance(resample_interval, int)):
-                raise SamplerException(
-                    "Specified resampling-interval is not valid. Please provide"
-                    " a positive integer value for resampling-interval"
-                )
-
-        else:
-            raise SamplerException(
-                "Resampling interval was not specified in the sampler file."
-                " Please specify it with the 'resampling-interval' key in the sampler config file."
-            )
-
-    sampler_manager = SamplerManager(sampler_config, run_seed)
-    return sampler_manager, resample_interval
-
-
-def try_create_meta_curriculum(
-    curriculum_config: Optional[Dict], env: SubprocessEnvManager, lesson: int
-) -> Optional[MetaCurriculum]:
-    if curriculum_config is None or len(curriculum_config) <= 0:
-        return None
-    else:
-        meta_curriculum = MetaCurriculum(curriculum_config)
-        # TODO: Should be able to start learning at different lesson numbers
-        # for each curriculum.
-        meta_curriculum.set_all_curricula_to_lesson_num(lesson)
-        return meta_curriculum
 
 
 def create_environment_factory(
@@ -302,9 +265,11 @@ def run_cli(options: RunOptions) -> None:
     add_timer_metadata("mlagents_envs_version", mlagents_envs.__version__)
     add_timer_metadata("communication_protocol_version", UnityEnvironment.API_VERSION)
     add_timer_metadata("tensorflow_version", tf_utils.tf.__version__)
+    add_timer_metadata("numpy_version", np.__version__)
 
     if options.env_settings.seed == -1:
         run_seed = np.random.randint(0, 10000)
+        logger.info(f"run_seed set to {run_seed}")
     run_training(run_seed, options)
 
 

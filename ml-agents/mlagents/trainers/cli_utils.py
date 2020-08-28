@@ -60,13 +60,6 @@ def _create_parser() -> argparse.ArgumentParser:
         action=DetectDefault,
     )
     argparser.add_argument(
-        "--lesson",
-        default=0,
-        type=int,
-        help="The lesson to start with when performing curriculum training",
-        action=DetectDefault,
-    )
-    argparser.add_argument(
         "--load",
         default=False,
         dest="load_model",
@@ -110,13 +103,6 @@ def _create_parser() -> argparse.ArgumentParser:
         "This can be used, for instance, to fine-tune an existing model on a new environment. "
         "Note that the previously saved models must have the same behavior parameters as your "
         "current environment.",
-        action=DetectDefault,
-    )
-    argparser.add_argument(
-        "--save-freq",
-        default=50000,
-        type=int,
-        help="How often (in steps) to save the model during training",
         action=DetectDefault,
     )
     argparser.add_argument(
@@ -182,6 +168,13 @@ def _create_parser() -> argparse.ArgumentParser:
         action=DetectDefaultStoreTrue,
         help="Forces training using CPU only",
     )
+    argparser.add_argument(
+        "--torch",
+        default=False,
+        action=DetectDefaultStoreTrue,
+        help="(Experimental) Use the PyTorch framework instead of TensorFlow. Install PyTorch "
+        "before using this option",
+    )
 
     eng_conf = argparser.add_argument_group(title="Engine Configuration")
     eng_conf.add_argument(
@@ -246,7 +239,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
     try:
         with open(config_path) as data_file:
             return _load_config(data_file)
-    except IOError:
+    except OSError:
         abs_path = os.path.abspath(config_path)
         raise TrainerConfigError(f"Config file could not be found at {abs_path}.")
     except UnicodeDecodeError:

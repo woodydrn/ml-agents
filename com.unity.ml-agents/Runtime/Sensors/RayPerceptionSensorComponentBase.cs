@@ -50,7 +50,7 @@ namespace Unity.MLAgents.Sensors
         {
             get { return m_RaysPerDirection; }
             // Note: can't change at runtime
-            set { m_RaysPerDirection = value;}
+            set { m_RaysPerDirection = value; }
         }
 
         [HideInInspector, SerializeField, FormerlySerializedAs("maxRayDegrees")]
@@ -281,6 +281,11 @@ namespace Unity.MLAgents.Sensors
             else
             {
                 var rayInput = GetRayPerceptionInput();
+                // We don't actually need the tags here, since they don't affect the display of the rays.
+                // Additionally, the user might be in the middle of typing the tag name when this is called,
+                // and there's no way to turn off the "Tag ... is not defined" error logs.
+                // So just don't use any tags here.
+                rayInput.DetectableTags = null;
                 for (var rayIndex = 0; rayIndex < rayInput.Angles.Count; rayIndex++)
                 {
                     DebugDisplayInfo.RayInfo debugRay;

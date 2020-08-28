@@ -12,7 +12,7 @@ test_mac_training_int_{{ editor.version }}:
   variables:
     UNITY_VERSION: {{ editor.version }}
   commands:
-    - pip install pyyaml
+    - pip install pyyaml --index-url https://artifactory.prd.it.unity3d.com/artifactory/api/pypi/pypi/simple
     - python -u -m ml-agents.tests.yamato.training_int_tests
     # Backwards-compatibility tests.
     # If we make a breaking change to the communication protocol, these will need
@@ -28,6 +28,7 @@ test_mac_training_int_{{ editor.version }}:
       pull_request.target match "release.+") AND
       NOT pull_request.draft AND
       (pull_request.changes.any match "com.unity.ml-agents/**" OR
+      pull_request.changes.any match "com.unity.ml-agents.extensions/**" OR
       pull_request.changes.any match "Project/**" OR
       pull_request.changes.any match "ml-agents/**" OR
       pull_request.changes.any match "ml-agents-envs/**" OR
@@ -37,7 +38,10 @@ test_mac_training_int_{{ editor.version }}:
     logs:
       paths:
         - "artifacts/standalone_build.txt"
+        - "artifacts/inference.nn.txt"
+        - "artifacts/inference.onnx.txt"
     standalonebuild:
       paths:
         - "artifacts/testplayer*/**"
+        - "artifacts/models/**"
 {% endfor %}

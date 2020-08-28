@@ -12,7 +12,7 @@ start TensorBoard:
 
 1. Open a terminal or console window:
 1. Navigate to the directory where the ML-Agents Toolkit is installed.
-1. From the command line run: `tensorboard --logdir=results --port=6006`
+1. From the command line run: `tensorboard --logdir results --port 6006`
 1. Open a browser window and navigate to
    [localhost:6006](http://localhost:6006).
 
@@ -28,9 +28,6 @@ On the left side of the TensorBoard window, you can select which of the training
 runs you want to display. You can select multiple run-ids to compare statistics.
 The TensorBoard window also provides options for how to display and smooth
 graphs.
-
-When you run the training program, `mlagents-learn`, you can use the
-`--save-freq` option to specify how frequently to save the statistics.
 
 ## The ML-Agents Toolkit training statistics
 
@@ -122,9 +119,15 @@ The ML-Agents training program saves the following statistics:
   skill level between two players. In a proper training run, the ELO of the
   agent should steadily increase.
 
+## Exporting Data from TensorBoard
+To export timeseries data in CSV or JSON format, check the "Show data download
+links" in the upper left. This will enable download links below each chart.
+
+![Example TensorBoard Run](images/TensorBoard-download.png)
+
 ## Custom Metrics from Unity
 
-To get custom metrics from a C# environment into Tensorboard, you can use the
+To get custom metrics from a C# environment into TensorBoard, you can use the
 `StatsRecorder`:
 
 ```csharp
